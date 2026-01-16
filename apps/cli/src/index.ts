@@ -121,7 +121,7 @@ program
                 if (count >= limit) break;
 
                 const status = wf.status.name;
-                const statusIcon = status === 'Running' ? '🔄' : status === 'Completed' ? '✅' : '❌';
+                const statusIcon = status === 'RUNNING' ? '🔄' : status === 'COMPLETED' ? '✅' : '❌';
 
                 console.log(`${statusIcon} ${wf.workflowId}`);
                 console.log(`   Type: ${wf.type} | Status: ${status}`);

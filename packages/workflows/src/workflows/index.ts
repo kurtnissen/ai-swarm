@@ -11,3 +11,6 @@ export type { SelfHealInput } from './self-heal.js';
 // v3.0.0: Visual Swarm Workflow
 export { visualSwarm, visualEditChild, cancelSwarmSignal } from './visual-swarm.js';
 export type { VisualEditChildInput } from './visual-swarm.js';
+
+// v3.1.0: Plan & Execute Workflow
+export { planAndExecute } from './plan-and-execute.js';

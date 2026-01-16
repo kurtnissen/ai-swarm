@@ -58,6 +58,7 @@ export default function ChatPage() {
     const [showMockupGallery, setShowMockupGallery] = useState(false);
     const [mockupDescription, setMockupDescription] = useState('');
     const [launchingSwarm, setLaunchingSwarm] = useState(false);
+    const [agenticMode, setAgenticMode] = useState(true);
 
     // Auto-resize textarea
     useEffect(() => {
@@ -278,21 +279,39 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
             }
 
             // Create task via workflows API
+            const context = currentConversation.messages
+                .filter(m => m.role === 'user')
+                .map(m => m.content)
+                .join('\n');
+
+            // Extract images from conversation
+            const images: string[] = [];
+            currentConversation.messages.forEach(m => {
+                if (m.images) {
+                    m.images.forEach(img => images.push(img.base64));
+                }
+            });
+
             const res = await fetch('/api/workflows', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    workflowType: agenticMode ? 'planAndExecute' : 'developFeature',
                     task: {
                         id: `task-${Date.now()}`,
                         title: currentConversation.title,
-                        context: currentConversation.messages
-                            .filter(m => m.role === 'user')
-                            .map(m => m.content)
-                            .join('\n'),
+                        context,
                         plan,
                         projectId: selectedProject,
                         createdAt: new Date().toISOString(),
+                        images: images.length > 0 ? images : undefined
                     },
+                    // PlanAndExecute specific fields
+                    prompt: context,
+                    projectId: selectedProject,
+                    images: images.length > 0 ? images : undefined,
+                    maxWorkers: 3,
+
                     skipApproval: true,
                     notifyOnComplete: true,
                 }),
@@ -875,13 +894,24 @@ Format as a list of targets. Also clarify the exact styling instruction to apply
                         {/* Submit Task button - shows when there's at least one assistant response */}
                         {currentConversation &&
                             currentConversation.messages.some(m => m.role === 'assistant') && (
-                                <button
-                                    onClick={createTask}
-                                    disabled={loading}
-                                    className="btn btn-primary"
-                                >
-                                    Submit Task
-                                </button>
+                                <div className="flex items-center gap-3">
+                                    <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={agenticMode}
+                                            onChange={(e) => setAgenticMode(e.target.checked)}
+                                            className="form-checkbox h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                        />
+                                        Agentic Mode (Auto-Breakdown)
+                                    </label>
+                                    <button
+                                        onClick={createTask}
+                                        disabled={loading}
+                                        className="btn btn-primary"
+                                    >
+                                        {agenticMode ? 'Execute Agentic Plan' : 'Submit Single Task'}
+                                    </button>
+                                </div>
                             )}
                     </div>
                     {currentConversation &&
