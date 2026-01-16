@@ -26,7 +26,11 @@ update_env() {
     local value=$2
     if grep -q "^${key}=" .env; then
         # Use a different delimiter for sed because URLs contain slashes
-        sed -i "s|^${key}=.*|${key}=${value}|" .env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|^${key}=.*|${key}=${value}|" .env
+        else
+            sed -i "s|^${key}=.*|${key}=${value}|" .env
+        fi
     else
         echo "${key}=${value}" >> .env
     fi

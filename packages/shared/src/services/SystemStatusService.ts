@@ -24,33 +24,41 @@ export class SystemStatusService {
             gemini: { authenticated: false, message: '' }
         };
 
-        // Check Claude using `claude doctor`
-        // Reference: CLAUDE_CLI.md - "claude doctor: Check health of auto-updater/installation"
+        // Check Claude - optimize by checking files/env instead of spawning heavy process
         try {
-            const { stdout, stderr } = await execAsync('claude doctor 2>&1', { timeout: 10000 });
-            const output = stdout + stderr;
-
-            // claude doctor outputs health check info - look for authentication indicators
-            if (output.includes('Authenticated') ||
-                output.includes('logged in') ||
-                output.includes('Pro') ||
-                output.includes('Max') ||
-                !output.includes('not authenticated') && !output.includes('Please log in')) {
+            // 1. Check for API Key env var (fastest)
+            if (process.env.Z_AI_API_KEY) {
                 results.claude.authenticated = true;
-                results.claude.message = 'Authenticated';
+                results.claude.message = 'Authenticated via Z_AI_API_KEY';
             } else {
-                results.claude.message = 'Requires Login';
+                // 2. Check for credentials file
+                const claudeDir = join(homedir(), '.claude');
+                const configPaths = [
+                    join(claudeDir, 'settings.json'),
+                    join(claudeDir, 'session.json'),
+                    join(claudeDir, 'oauth.json')
+                ];
+
+                let foundConfig = false;
+                for (const configPath of configPaths) {
+                    try {
+                        await access(configPath, constants.R_OK);
+                        foundConfig = true;
+                        break;
+                    } catch {
+                        // Continue checking
+                    }
+                }
+
+                if (foundConfig) {
+                    results.claude.authenticated = true;
+                    results.claude.message = 'Credentials found';
+                } else {
+                    results.claude.message = 'Requires Login';
+                }
             }
         } catch (err: any) {
-            // Fallback: check for OAuth credentials file
-            try {
-                const oauthPath = join(homedir(), '.claude', 'oauth.json');
-                await access(oauthPath, constants.R_OK);
-                results.claude.authenticated = true;
-                results.claude.message = 'Credentials found';
-            } catch {
-                results.claude.message = 'Requires Login';
-            }
+            results.claude.message = 'Check failed';
         }
 
         // Check Gemini - no direct auth check command

@@ -162,7 +162,11 @@ sync_cli_configs() {
   # Claude
   if [ -f "$shared_oauth/claude/settings.json" ]; then
     mkdir -p "$home_dir/.claude"
-    cp "$shared_oauth/claude/settings.json" "$home_dir/.claude/settings.json"
+    if ! [ "$shared_oauth/claude/settings.json" -ef "$home_dir/.claude/settings.json" ]; then
+        cp "$shared_oauth/claude/settings.json" "$home_dir/.claude/settings.json" || echo "Warning: Failed to copy Claude settings"
+    else
+        echo "Claude settings already synced (same file)"
+    fi
     echo "Synced Claude config from shared volume"
   elif [ -n "$Z_AI_API_KEY" ]; then
     mkdir -p "$home_dir/.claude"

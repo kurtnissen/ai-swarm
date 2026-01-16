@@ -39,3 +39,4 @@ coverage/
 
 # Docker volumes (if mounted locally)
 data/
+worktrees/

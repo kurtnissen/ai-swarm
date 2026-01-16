@@ -113,12 +113,22 @@ export async function invokeGeminiAsync(
         // =======================================================================
         // STEP 2: Spawn Gemini CLI and pipe prompt to stdin
         // =======================================================================
+        // Validate cwd exists before spawning
+        let cwd = options.cwd || process.cwd();
+        try {
+            await fs.access(cwd);
+        } catch {
+            logger.warn({ taskId, cwd }, 'CWD does not exist, falling back to /app');
+            cwd = '/app';
+        }
+
         const geminiProcess = spawn('gemini', args, {
-            cwd: options.cwd || process.cwd(),
-            shell: true,
+            cwd,
+            shell: false, // Don't use shell to avoid /bin/sh ENOENT issues
             env: {
                 ...process.env,
                 GEMINI_NONINTERACTIVE: '1',
+                PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
             },
             stdio: ['pipe', 'pipe', 'pipe'],
         });

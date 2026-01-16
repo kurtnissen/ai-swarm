@@ -27,7 +27,8 @@ async function checkClaudeAuthStatus(): Promise<boolean> {
     const claudeDir = path.join(process.env.HOME || '/root', '.claude');
     try {
         // Check for credentials file that OAuth login creates
-        const credentialsPath = path.join(claudeDir, 'credentials.json');
+        // Note: Claude CLI stores credentials in .credentials.json (with leading dot)
+        const credentialsPath = path.join(claudeDir, '.credentials.json');
         await fs.access(credentialsPath);
 
         // Read and validate credentials exist and aren't empty
@@ -109,6 +110,17 @@ export async function executeClaudeCode(input: ClaudeCodeInput): Promise<ClaudeC
                     error: errorMsg,
                 };
             }
+
+            // OAuth mode: Remove any Z.ai settings.json that might override OAuth
+            // This can happen if previously configured for Z.ai mode
+            const settingsPath = path.join(claudeDir, 'settings.json');
+            try {
+                await fs.unlink(settingsPath);
+                logger.info('Removed Z.ai settings.json to use OAuth authentication');
+            } catch {
+                // File doesn't exist, that's fine
+            }
+
             logger.info('OAuth mode: Using existing Claude authentication');
         }
 

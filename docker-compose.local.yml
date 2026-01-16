@@ -13,7 +13,3 @@ services:
     ports:
       - "${TEMPORAL_UI_PORT:-8233}:8080"
 
-  # Web marketing site (optional for local dev)
-  web:
-    ports:
-      - "${WEB_PORT:-3001}:3000"

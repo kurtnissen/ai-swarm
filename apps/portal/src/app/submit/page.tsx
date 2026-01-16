@@ -2,11 +2,21 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { ImagePlus, X, Palette, Layers } from 'lucide-react';
+import MockupGallery from '@/app/components/chat/MockupGallery';
+
+interface ImageAttachment {
+    id: string;
+    name: string;
+    base64: string;
+    preview: string;
+}
 
 interface Message {
     role: 'user' | 'assistant';
     content: string;
     timestamp: string;
+    images?: ImageAttachment[];
 }
 
 interface ConversationSummary {
@@ -34,8 +44,7 @@ export default function ChatPage() {
     const router = useRouter();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [projects, setProjects] = useState<Project[]>([]);
     const [selectedProject, setSelectedProject] = useState<string>('');
@@ -44,6 +53,11 @@ export default function ChatPage() {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [attachedImages, setAttachedImages] = useState<ImageAttachment[]>([]);
+    const [isDragging, setIsDragging] = useState(false);
+    const [showMockupGallery, setShowMockupGallery] = useState(false);
+    const [mockupDescription, setMockupDescription] = useState('');
+    const [launchingSwarm, setLaunchingSwarm] = useState(false);
 
     // Auto-resize textarea
     useEffect(() => {
@@ -105,7 +119,7 @@ export default function ChatPage() {
     }
 
     async function startNewConversation() {
-        if (!input.trim()) return;
+        if (!input.trim() && attachedImages.length === 0) return;
 
         try {
             setLoading(true);
@@ -115,7 +129,7 @@ export default function ChatPage() {
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'new', message: input }),
+                body: JSON.stringify({ action: 'new', message: input || 'Image attached' }),
             });
             const newConv = await res.json();
 
@@ -126,8 +140,8 @@ export default function ChatPage() {
                 planReady: false,
             });
 
-            // Send first message to Planner
-            await sendMessage(newConv.tag, input);
+            // Send first message to Planner (with images if attached)
+            await sendMessage(newConv.tag, input, attachedImages.length > 0 ? attachedImages : undefined);
 
             // Refresh conversation list
             await loadConversations();
@@ -139,7 +153,7 @@ export default function ChatPage() {
         }
     }
 
-    async function sendMessage(tag: string, message: string) {
+    async function sendMessage(tag: string, message: string, images?: ImageAttachment[]) {
         try {
             setLoading(true);
             setError(null);
@@ -151,14 +165,23 @@ export default function ChatPage() {
                     role: 'user' as const,
                     content: message,
                     timestamp: new Date().toISOString(),
+                    images: images,
                 }],
             } : null);
+
+            // Clear attached images after adding to message
+            setAttachedImages([]);
 
             // Send to Planner
             const res = await fetch('/api/chat/planner', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tag, message, projectId: selectedProject }),
+                body: JSON.stringify({
+                    tag,
+                    message,
+                    projectId: selectedProject,
+                    images: images?.map(img => ({ name: img.name, base64: img.base64 })),
+                }),
             });
 
             if (!res.ok) {
@@ -182,10 +205,10 @@ export default function ChatPage() {
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        if (!input.trim() || loading) return;
+        if ((!input.trim() && attachedImages.length === 0) || loading) return;
 
         if (currentConversation) {
-            await sendMessage(currentConversation.tag, input);
+            await sendMessage(currentConversation.tag, input, attachedImages.length > 0 ? attachedImages : undefined);
             setInput('');
         } else {
             await startNewConversation();
@@ -290,6 +313,272 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
         setCurrentConversation(null);
         setInput('');
         setError(null);
+        setAttachedImages([]);
+    }
+
+    async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+        const files = e.target.files;
+        if (!files) return;
+
+        const newImages: ImageAttachment[] = [];
+
+        for (const file of Array.from(files)) {
+            if (!file.type.startsWith('image/')) continue;
+            if (file.size > 10 * 1024 * 1024) {
+                setError('Image must be less than 10MB');
+                continue;
+            }
+
+            const base64 = await fileToBase64(file);
+            newImages.push({
+                id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                name: file.name,
+                base64,
+                preview: URL.createObjectURL(file),
+            });
+        }
+
+        setAttachedImages(prev => [...prev, ...newImages]);
+        // Reset input so same file can be selected again
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+
+    function removeImage(id: string) {
+        setAttachedImages(prev => {
+            const img = prev.find(i => i.id === id);
+            if (img) URL.revokeObjectURL(img.preview);
+            return prev.filter(i => i.id !== id);
+        });
+    }
+
+    function fileToBase64(file: File): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function handleDrop(e: React.DragEvent) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+
+        const files = e.dataTransfer?.files;
+        if (!files) return;
+
+        const newImages: ImageAttachment[] = [];
+
+        for (const file of Array.from(files)) {
+            if (!file.type.startsWith('image/')) continue;
+            if (file.size > 10 * 1024 * 1024) {
+                setError('Image must be less than 10MB');
+                continue;
+            }
+
+            const base64 = await fileToBase64(file);
+            newImages.push({
+                id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                name: file.name,
+                base64,
+                preview: URL.createObjectURL(file),
+            });
+        }
+
+        if (newImages.length > 0) {
+            setAttachedImages(prev => [...prev, ...newImages]);
+        }
+    }
+
+    function handleDragOver(e: React.DragEvent) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+    }
+
+    function handleDragLeave(e: React.DragEvent) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    }
+
+    function openMockupGallery() {
+        // Use conversation context or input as description
+        const description = input.trim() ||
+            currentConversation?.messages
+                .filter(m => m.role === 'user')
+                .map(m => m.content)
+                .join(' ')
+                .slice(0, 500) ||
+            'UI design';
+
+        setMockupDescription(description);
+        setShowMockupGallery(true);
+    }
+
+    async function handleMockupSelect(mockup: { id: string; title: string; description: string; html: string }) {
+        setShowMockupGallery(false);
+
+        // Create a message indicating the selected mockup
+        const message = `I've selected the "${mockup.title}" design style (${mockup.description}). Please use this as the basis for the UI implementation.`;
+
+        if (currentConversation) {
+            await sendMessage(currentConversation.tag, message);
+        } else {
+            setInput(message);
+        }
+    }
+
+    /**
+     * Launch Visual Swarm for parallel visual editing.
+     * Extracts targets from conversation and dispatches the workflow.
+     */
+    async function launchVisualSwarm() {
+        if (!currentConversation || !selectedProject) {
+            setError('Please select a project and have an active conversation');
+            return;
+        }
+
+        try {
+            setLaunchingSwarm(true);
+            setError(null);
+
+            // Gather conversation context for target parsing
+            const conversationContext = currentConversation.messages
+                .map(m => `${m.role}: ${m.content}`)
+                .join('\n');
+
+            // First, try to extract targets using the parse API
+            const parseRes = await fetch('/api/chat/planner', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tag: currentConversation.tag,
+                    message: `Based on our conversation, identify all the target pages/components that need styling changes. For each target, provide:
+1. The file path (e.g., src/app/dashboard/page.tsx)
+2. The URL where it can be previewed (e.g., http://localhost:3000/dashboard)
+
+Format as a list of targets. Also clarify the exact styling instruction to apply to all targets.`,
+                    projectId: selectedProject,
+                }),
+            });
+
+            if (!parseRes.ok) {
+                throw new Error('Failed to parse targets from conversation');
+            }
+
+            const parseData = await parseRes.json();
+
+            // Extract the latest assistant message which should contain target info
+            const latestAssistant = parseData.conversation?.messages
+                ?.filter((m: any) => m.role === 'assistant')
+                .pop();
+
+            // For now, use a simple approach - extract file paths and URLs from the conversation
+            // In a production system, this would use the parseTargets activity
+            const targets = extractTargetsFromConversation(currentConversation.messages);
+            const stylingInstruction = input.trim() ||
+                currentConversation.messages
+                    .filter(m => m.role === 'user')
+                    .map(m => m.content)
+                    .join(' ')
+                    .slice(0, 500);
+
+            if (targets.length === 0) {
+                // If no targets found, ask user to specify
+                setError('Could not identify target files/URLs. Please specify the files and URLs to modify in your message.');
+                return;
+            }
+
+            // Dispatch the Visual Swarm workflow
+            const res = await fetch('/api/swarm/dispatch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    targets,
+                    stylingInstruction,
+                    projectId: selectedProject,
+                    maxRetries: 3,
+                }),
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Failed to launch Visual Swarm');
+            }
+
+            const data = await res.json();
+
+            // Navigate to workflow view or show success
+            router.push(`/workflows/${data.workflowId}`);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to launch Visual Swarm');
+        } finally {
+            setLaunchingSwarm(false);
+        }
+    }
+
+    /**
+     * Extract targets from conversation messages.
+     * Looks for file paths and URLs in the conversation.
+     */
+    function extractTargetsFromConversation(messages: Message[]): { url: string; filePath: string; componentName?: string }[] {
+        const targets: { url: string; filePath: string; componentName?: string }[] = [];
+        const seenPaths = new Set<string>();
+
+        // Common patterns for file paths and URLs
+        const filePathPattern = /(?:\/[\w.-]+)+\.(?:tsx?|jsx?|vue|svelte)/g;
+        const urlPattern = /https?:\/\/localhost:\d+\/[\w/.-]*/g;
+
+        for (const msg of messages) {
+            // Extract file paths
+            const filePaths = msg.content.match(filePathPattern) || [];
+            const urls = msg.content.match(urlPattern) || [];
+
+            for (const filePath of filePaths) {
+                if (seenPaths.has(filePath)) continue;
+                seenPaths.add(filePath);
+
+                // Try to infer URL from file path
+                let url = 'http://localhost:3000';
+                if (filePath.includes('/app/')) {
+                    // Next.js app router - extract route from path
+                    const routeMatch = filePath.match(/\/app\/(.+?)\/page\./);
+                    if (routeMatch) {
+                        url = `http://localhost:3000/${routeMatch[1]}`;
+                    }
+                } else if (filePath.includes('/pages/')) {
+                    // Next.js pages router
+                    const routeMatch = filePath.match(/\/pages\/(.+?)\./);
+                    if (routeMatch) {
+                        const route = routeMatch[1].replace(/\/index$/, '');
+                        url = `http://localhost:3000/${route}`;
+                    }
+                }
+
+                targets.push({ url, filePath });
+            }
+
+            // Also add explicit URLs that might be in the conversation
+            for (const url of urls) {
+                // Check if we already have a target for this URL
+                if (!targets.some(t => t.url === url)) {
+                    // Try to infer file path from URL
+                    const pathMatch = url.match(/localhost:\d+\/(.+)/);
+                    if (pathMatch) {
+                        const route = pathMatch[1];
+                        const filePath = `/src/app/${route}/page.tsx`;
+                        if (!seenPaths.has(filePath)) {
+                            targets.push({ url, filePath });
+                            seenPaths.add(filePath);
+                        }
+                    }
+                }
+            }
+        }
+
+        return targets;
     }
 
     async function deleteChat(tag: string) {
@@ -399,6 +688,19 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
                             <div className="text-xs opacity-70 mb-1">
                                 {msg.role === 'user' ? 'You' : 'Planner'}
                             </div>
+                            {/* Display attached images */}
+                            {msg.images && msg.images.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mb-2">
+                                    {msg.images.map((img) => (
+                                        <img
+                                            key={img.id}
+                                            src={img.preview || img.base64}
+                                            alt={img.name}
+                                            className="max-h-40 max-w-full rounded-md border border-border/50"
+                                        />
+                                    ))}
+                                </div>
+                            )}
                             <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
                         </div>
                     </div>
@@ -421,8 +723,77 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
             </div>
 
             {/* Input area */}
-            <div className="mt-4">
+            <div
+                className={`mt-4 relative ${isDragging ? 'ring-2 ring-swarm-blue ring-offset-2 ring-offset-background rounded-lg' : ''}`}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+            >
+                {/* Drag overlay */}
+                {isDragging && (
+                    <div className="absolute inset-0 bg-swarm-blue/10 border-2 border-dashed border-swarm-blue rounded-lg flex items-center justify-center z-10">
+                        <div className="text-swarm-blue font-medium">Drop images here</div>
+                    </div>
+                )}
+
+                {/* Image previews */}
+                {attachedImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3 p-2 bg-swarm-surface/30 rounded-lg border border-border">
+                        {attachedImages.map((img) => (
+                            <div key={img.id} className="relative group">
+                                <img
+                                    src={img.preview}
+                                    alt={img.name}
+                                    className="h-16 w-16 object-cover rounded-md border border-border"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => removeImage(img.id)}
+                                    className="absolute -top-2 -right-2 bg-swarm-red text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                    <X className="h-3 w-3" />
+                                </button>
+                                <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] px-1 truncate rounded-b-md">
+                                    {img.name}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="flex gap-3 items-end">
+                    {/* Hidden file input */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleImageSelect}
+                        className="hidden"
+                    />
+
+                    {/* Image upload button */}
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={loading}
+                        className="p-3 bg-swarm-surface border border-swarm-border rounded-md hover:border-swarm-blue hover:text-swarm-blue transition-colors disabled:opacity-50"
+                        title="Attach images"
+                    >
+                        <ImagePlus className="h-5 w-5" />
+                    </button>
+
+                    {/* Generate mockups button */}
+                    <button
+                        type="button"
+                        onClick={openMockupGallery}
+                        disabled={loading}
+                        className="p-3 bg-swarm-surface border border-swarm-border rounded-md hover:border-swarm-purple hover:text-swarm-purple transition-colors disabled:opacity-50"
+                        title="Generate UI mockups"
+                    >
+                        <Palette className="h-5 w-5" />
+                    </button>
+
                     <textarea
                         ref={textareaRef}
                         value={input}
@@ -433,14 +804,41 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
                                 handleSubmit(e as any);
                             }
                         }}
-                        placeholder={currentConversation ? "Reply to Planner..." : "Describe your task..."}
+                        onPaste={async (e) => {
+                            const items = e.clipboardData?.items;
+                            if (!items) return;
+
+                            const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+                            if (imageItems.length === 0) return;
+
+                            e.preventDefault(); // Prevent pasting image as text
+
+                            const newImages: ImageAttachment[] = [];
+                            for (const item of imageItems) {
+                                const file = item.getAsFile();
+                                if (!file) continue;
+
+                                const base64 = await fileToBase64(file);
+                                newImages.push({
+                                    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                                    name: `pasted-image-${Date.now()}.png`,
+                                    base64,
+                                    preview: URL.createObjectURL(file),
+                                });
+                            }
+
+                            if (newImages.length > 0) {
+                                setAttachedImages(prev => [...prev, ...newImages]);
+                            }
+                        }}
+                        placeholder={currentConversation ? "Reply to Planner... (paste images here)" : "Describe your task... (paste images here)"}
                         disabled={loading}
                         rows={1}
                         className="flex-1 px-4 py-3 bg-swarm-bg border border-swarm-border rounded-md focus:border-swarm-blue focus:outline-none disabled:opacity-50 resize-none overflow-y-auto min-h-[46px]"
                     />
                     <button
                         type="submit"
-                        disabled={loading || !input.trim()}
+                        disabled={loading || (!input.trim() && attachedImages.length === 0)}
                         className="btn btn-primary px-6"
                     >
                         {loading ? '...' : 'Send'}
@@ -449,7 +847,7 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
 
                 {/* Action buttons */}
                 <div className="flex flex-col items-end mt-3 gap-2">
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-3">
                         {/* Generate Plan button - shows when 2+ messages */}
                         {currentConversation &&
                             currentConversation.messages.length >= 2 && (
@@ -459,6 +857,19 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
                                     className="btn btn-ghost border border-swarm-blue text-swarm-blue hover:bg-swarm-blue/10"
                                 >
                                     Generate Plan
+                                </button>
+                            )}
+                        {/* Visual Swarm button - for parallel styling edits */}
+                        {currentConversation &&
+                            currentConversation.messages.length >= 2 && (
+                                <button
+                                    onClick={launchVisualSwarm}
+                                    disabled={loading || launchingSwarm}
+                                    className="btn btn-ghost border border-swarm-purple text-swarm-purple hover:bg-swarm-purple/10 flex items-center gap-2"
+                                    title="Launch Visual Swarm for parallel styling across multiple pages"
+                                >
+                                    <Layers className="h-4 w-4" />
+                                    {launchingSwarm ? 'Launching...' : 'Visual Swarm'}
                                 </button>
                             )}
                         {/* Submit Task button - shows when there's at least one assistant response */}
@@ -476,11 +887,20 @@ IMPORTANT: Respond with ONLY the JSON object, no explanation or text before/afte
                     {currentConversation &&
                         currentConversation.messages.some(m => m.role === 'assistant') && (
                             <p className="text-xs text-muted-foreground">
-                                Submit only after a plan with JSON has been generated.
+                                Submit only after a plan with JSON has been generated. Use Visual Swarm for parallel styling.
                             </p>
                         )}
                 </div>
             </div>
+
+            {/* Mockup Gallery Modal */}
+            {showMockupGallery && (
+                <MockupGallery
+                    description={mockupDescription}
+                    onSelect={handleMockupSelect}
+                    onCancel={() => setShowMockupGallery(false)}
+                />
+            )}
         </div>
     );
 }

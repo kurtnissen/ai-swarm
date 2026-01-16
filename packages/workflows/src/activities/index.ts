@@ -37,3 +37,23 @@ export {
 
 // v3.0.0: Declarative Deployment Config
 export { analyzeDeployConfig } from './analyzeDeployConfig.js';
+
+// v3.0.0: Visual Swarm Activities
+export {
+    applyGeminiEdit,
+    captureVisualScreenshot,
+    verifyWithAI,
+    parseTargets,
+} from './visual-swarm/index.js';
+export type {
+    TargetPage,
+    VisualSwarmInput,
+    VisualSwarmOutput,
+    TargetResult,
+    VerificationResult,
+    ApplyEditInput,
+    ApplyEditOutput,
+    VerifyWithAIInput,
+    ParseTargetsInput,
+    ParseTargetsOutput,
+} from './visual-swarm/index.js';

@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
 
-        // Validate required fields
-        const required = ['name', 'scmProvider', 'scmOrg', 'scmRepo'];
+        // Validate required fields (only name and projectFolder are required now)
+        const required = ['name', 'projectFolder'];
         for (const field of required) {
             if (!body[field]) {
                 return NextResponse.json(
@@ -39,13 +39,13 @@ export async function POST(request: NextRequest) {
 
         const project = await projectService.createProject({
             name: body.name,
-            scmProvider: body.scmProvider,
-            scmOrg: body.scmOrg,
-            scmProject: body.scmProject,
-            scmRepo: body.scmRepo,
-            scmToken: body.scmToken,
+            scmProvider: body.scmProvider || '',
+            scmOrg: body.scmOrg || '',
+            scmProject: body.scmProject || '',
+            scmRepo: body.scmRepo || '',
+            scmToken: body.scmToken || '',
             projectFolder: body.projectFolder,
-            aiContextFolder: body.aiContextFolder,
+            aiContextFolder: body.aiContextFolder || '.aicontext',
         });
 
         // v3.0.0: Immediately configure deployment if provided

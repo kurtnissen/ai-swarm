@@ -90,12 +90,14 @@ COPY packages/shared/prompts/ /opt/ai-swarm/prompts/
 COPY packages/workflows/templates/claude-settings.json /opt/ai-swarm/templates/claude-settings.json
 
 # Create non-root user with UID 1001 (for worktree permission fix)
-# Also create symlinks for Gemini auth so interactive login persists to shared volume
+# Create symlinks for Claude/Gemini auth so interactive login persists to shared volume
+# This ensures both the worker process AND docker exec sessions use shared credentials
 RUN useradd -m -s /bin/bash -u 1001 worker && \
-    mkdir -p /home/worker/.claude && \
     mkdir -p /home/worker/.config && \
+    mkdir -p /home/shared_oauth/claude && \
     mkdir -p /home/shared_oauth/gemini-settings && \
     mkdir -p /home/shared_oauth/gemini && \
+    ln -sfn /home/shared_oauth/claude /home/worker/.claude && \
     ln -sfn /home/shared_oauth/gemini-settings /home/worker/.gemini && \
     ln -sfn /home/shared_oauth/gemini /home/worker/.config/google-gemini-cli && \
     chown -R worker:worker /home/worker /home/shared_oauth
