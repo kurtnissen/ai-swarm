@@ -4,6 +4,7 @@
 
 export {
     planTask,
+    breakdownPlan,
     reviewCode,
 } from './planner.js';
 export { executeCode } from './coder.js';

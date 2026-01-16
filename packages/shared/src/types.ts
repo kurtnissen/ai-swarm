@@ -17,9 +17,29 @@ export interface Task {
     type?: 'feature' | 'bugfix' | 'refactor' | 'docs';  // Task type for branch naming
     metadata?: Record<string, unknown>;
     projectId?: string;  // v3.0.0: Project association for multi-project support
+    images?: string[];   // Base64 encoded images for multimodal context
 }
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+
+// =============================================================================
+// PLAN & EXECUTE WORKFLOW TYPES
+// =============================================================================
+
+export interface PlanAndExecuteInput {
+    prompt: string;
+    projectId: string;
+    images?: string[]; // base64 encoded images
+    maxWorkers?: number;
+}
+
+export interface PlanAndExecuteOutput {
+    status: 'completed' | 'failed' | 'cancelled';
+    plan?: ImplementationPlan;
+    tasks?: Task[];
+    completedTasks?: string[];
+    error?: string;
+}
 
 // =============================================================================
 // IMPLEMENTATION PLAN

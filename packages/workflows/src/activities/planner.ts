@@ -47,7 +47,7 @@ export async function planTask(input: Task): Promise<ImplementationPlan> {
 
         const systemPrompt = await loadSystemPrompt('planner');
 
-        const prompt = `${systemPrompt}
+    let prompt = `${systemPrompt}
 
 ## Task to Plan
 
@@ -69,6 +69,9 @@ ${(task.filesToModify || []).length > 0 ? task.filesToModify.map((f: any) => `- 
 
 Analyze this task and create a detailed implementation plan. Return ONLY valid JSON.`;
 
+    // Add images if present
+    const images = task.images || [];
+
         const plannerProvider = await systemConfigService.getLLMRole('planner');
         const claudeAuthMode = await systemConfigService.getClaudeAuthMode();
         const zaiApiKey = await systemConfigService.getZaiApiKey();
@@ -77,6 +80,12 @@ Analyze this task and create a detailed implementation plan. Return ONLY valid J
         if (plannerProvider === 'claude' && (claudeAuthMode === 'oauth' || (claudeAuthMode === 'zai' && zaiApiKey))) {
             logger.info('Using Claude Code for planning');
             const { executeClaudeCode } = await import('./llm-claude.js');
+            // Claude Code CLI doesn't support base64 images directly in the prompt text yet
+            // but we can pass them if the wrapper supports it.
+            // For now, we will just append a note about images being available in context if they were files.
+            // Since we receive base64, we might need to write them to temp files if we want Claude to see them.
+            // But 'executeClaudeCode' API here is simple.
+            // We'll rely on text prompt for now for Claude.
             const claudeResult = await executeClaudeCode({
                 task: prompt,
                 projectDir,
@@ -86,9 +95,14 @@ Analyze this task and create a detailed implementation plan. Return ONLY valid J
             response = claudeResult.stdout;
         } else {
             logger.info('Using Gemini CLI for planning');
+            // Gemini CLI (gemini-chat-cli) supports images via argument or within the prompt if extended.
+            // The `invokeGeminiCLI` function in shared might not support images argument yet.
+            // Assuming `invokeGeminiCLI` is a wrapper around `gemini-chat-cli`, we'll pass just text for now unless we update shared.
+            // TODO: Update shared `invokeGeminiCLI` to accept images.
             response = await invokeGeminiCLI(prompt, {
                 role: 'planner',
                 cwd: projectDir,
+                // images: images // Passing images if supported in future
             });
         }
 
@@ -109,6 +123,98 @@ Analyze this task and create a detailed implementation plan. Return ONLY valid J
     } catch (error) {
         const durationMs = Date.now() - startTime;
         logActivityComplete('planner', 'planTask', durationMs, false);
+        throw error;
+    }
+}
+
+/**
+ * Break down a high-level plan into a list of sub-tasks.
+ */
+export async function breakdownPlan(plan: ImplementationPlan): Promise<Task[]> {
+    const startTime = Date.now();
+    logActivityStart('planner', 'breakdownPlan', { taskId: plan.taskId });
+
+    try {
+        const prompt = `
+You are an expert technical project manager.
+Your goal is to break down a high-level implementation plan into a list of granular, independent tasks that can be executed in parallel by multiple AI workers.
+
+## High-Level Plan
+**Task ID:** ${plan.taskId}
+**Estimated Effort:** ${plan.estimatedEffort}
+
+**Proposed Changes:**
+${plan.proposedChanges.map((c: any) => `- ${c.action.toUpperCase()} ${c.path}: ${c.description}`).join('\n')}
+
+**Verification Plan:**
+${plan.verificationPlan}
+
+**Context:**
+${plan.context || 'No additional context provided.'}
+
+## Instructions
+1. Break this plan into 2-10 granular sub-tasks.
+2. Each task must be independent enough to be worked on by a separate developer.
+3. Include specific files to modify for each task.
+4. If the plan involves a new feature, include a task for "Scaffolding" or "Core Implementation" first if strictly necessary, but prefer parallelizable tasks (e.g., frontend vs backend, or different components).
+5. Ensure each task has acceptance criteria that includes "Passes unit tests".
+6. The output must be a JSON array of Task objects.
+
+## JSON Format
+[
+    {
+        "id": "generated-uuid",
+        "title": "Implement X component",
+        "context": "Detailed instructions...",
+        "acceptanceCriteria": ["Criteria 1", "Criteria 2"],
+        "filesToModify": ["src/path/to/file.ts"],
+        "priority": "medium",
+        "type": "feature"
+    }
+]
+
+Return ONLY the JSON array.
+`;
+
+        // Reuse the planner role
+        const plannerProvider = await systemConfigService.getLLMRole('planner');
+        let response: string;
+
+        // Simplify: just use the configured provider (assuming Gemini or Claude)
+        // Similar logic to planTask but simpler since we just need text generation
+        if (plannerProvider === 'claude') {
+             const { executeClaudeCode } = await import('./llm-claude.js');
+             const result = await executeClaudeCode({
+                 task: prompt,
+                 projectDir: process.env.PROJECT_DIR || '/project',
+                 role: 'planner'
+             });
+             response = result.stdout;
+        } else {
+             response = await invokeGeminiCLI(prompt, {
+                role: 'planner',
+                cwd: process.env.PROJECT_DIR || '/project',
+            });
+        }
+
+        const tasks = parseJsonFromResponse<Task[]>(response);
+
+        // Post-process tasks to ensure they have IDs and project association
+        const processedTasks = tasks.map((t, idx) => ({
+            ...t,
+            id: t.id || `${plan.taskId}-sub-${idx + 1}`,
+            projectId: plan.projectId,
+            createdAt: new Date(),
+        }));
+
+        const durationMs = Date.now() - startTime;
+        logActivityComplete('planner', 'breakdownPlan', durationMs, true);
+
+        return processedTasks;
+
+    } catch (error) {
+        const durationMs = Date.now() - startTime;
+        logActivityComplete('planner', 'breakdownPlan', durationMs, false);
         throw error;
     }
 }

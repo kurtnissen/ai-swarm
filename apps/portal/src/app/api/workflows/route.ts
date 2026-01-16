@@ -13,33 +13,50 @@ export async function POST(request: NextRequest) {
 
     try {
         const body = await request.json();
-        const { task, skipApproval, notifyOnComplete } = body;
+        const { task, skipApproval, notifyOnComplete, workflowType, images } = body;
 
-        if (!task || !task.title) {
+        if (!task && !body.prompt) {
             return NextResponse.json(
-                { error: 'Task title is required' },
+                { error: 'Task title or prompt is required' },
                 { status: 400 }
             );
         }
 
         const client = await getTemporalClient();
 
-        const workflowId = `develop-${task.id || Date.now()}`;
+        let handle;
 
-        const handle = await client.workflow.start('developFeature', {
-            taskQueue: 'ai-swarm-tasks',
-            workflowId,
-            args: [
-                {
-                    task: {
-                        ...task,
-                        createdAt: task.createdAt ? new Date(task.createdAt) : new Date(),
+        if (workflowType === 'planAndExecute') {
+            const workflowId = `plan-${Date.now()}`;
+            handle = await client.workflow.start('planAndExecute', {
+                taskQueue: 'ai-swarm-tasks',
+                workflowId,
+                args: [{
+                    prompt: body.prompt || task.title + '\n' + task.context,
+                    projectId: body.projectId || task?.projectId,
+                    images: images || task?.images,
+                    maxWorkers: body.maxWorkers
+                }]
+            });
+        } else {
+            // Default to developFeature
+            const workflowId = `develop-${task.id || Date.now()}`;
+            handle = await client.workflow.start('developFeature', {
+                taskQueue: 'ai-swarm-tasks',
+                workflowId,
+                args: [
+                    {
+                        task: {
+                            ...task,
+                            createdAt: task.createdAt ? new Date(task.createdAt) : new Date(),
+                            images: images || task.images,
+                        },
+                        skipApproval: skipApproval ?? false,
+                        notifyOnComplete: notifyOnComplete ?? true,
                     },
-                    skipApproval: skipApproval ?? false,
-                    notifyOnComplete: notifyOnComplete ?? true,
-                },
-            ],
-        });
+                ],
+            });
+        }
 
         return NextResponse.json({
             success: true,
